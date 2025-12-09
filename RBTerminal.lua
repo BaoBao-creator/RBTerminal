@@ -1,588 +1,424 @@
-local Terminal = {}
-Terminal.__index = Terminal
+local TerminalLib = {}
+TerminalLib.__index = TerminalLib
 
--- Services
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
 
--- Configuration
-local DEFAULT_FONT_SIZE = 14
-local DEFAULT_BG_COLOR = Color3.fromRGB(0, 0, 0)
-local DEFAULT_BG_TRANSPARENCY = 0.5
-local TITLEBAR_COLOR = Color3.fromRGB(50, 50, 50)
-local TITLEBAR_HEIGHT = 30
-local CONTROL_BTN_SIZE = UDim2.new(0, 30, 1, 0)
-local SETTINGS_BTN_SIZE = UDim2.new(0, 30, 1, 0)
-local ICON_SIZE = UDim2.new(0, 50, 0, 50)
-local MIN_WIDTH = 100
-local MIN_HEIGHT = 50
-local ZINDEX_BASE = 10000
-Terminal._globalZIndex = ZINDEX_BASE
+local PROTECT_GUI = true 
 
--- Create a new Terminal instance
-function Terminal:New()
-    local self = setmetatable({}, Terminal)
-    self.Buffer = {}
-    self.UI_Map = {}
-    self.MaxLines = 500
-    self.IsInputBlocked = false
-    self.CurrentFontSize = DEFAULT_FONT_SIZE
-
-    -- Create ScreenGui
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "TerminalScreenGui"
-    screenGui.Parent = CoreGui
-    screenGui.DisplayOrder = Terminal._globalZIndex
-    Terminal._globalZIndex = Terminal._globalZIndex + 1
-    self.ScreenGui = screenGui
-
-    -- Main Frame (window)
-    local mainFrame = Instance.new("Frame", screenGui)
-    mainFrame.Name = "TerminalWindow"
-    mainFrame.BackgroundColor3 = DEFAULT_BG_COLOR
-    mainFrame.BackgroundTransparency = DEFAULT_BG_TRANSPARENCY
-    mainFrame.BorderSizePixel = 1
-    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -150)
-    mainFrame.Size = UDim2.new(0, 500, 0, 300)
-    mainFrame.AnchorPoint = Vector2.new(0, 0)
-    mainFrame.Active = true
-    mainFrame.Draggable = false
-    mainFrame.ZIndex = screenGui.DisplayOrder
-    self.Frame = mainFrame
-    self._savedPosition = mainFrame.Position
-    self._savedSize = mainFrame.Size
-
-    -- Fix initial absolute position (to avoid using scale afterward)
-    RunService.Heartbeat:Wait()
-    local absPos = mainFrame.AbsolutePosition
-    mainFrame.Position = UDim2.new(0, absPos.X, 0, absPos.Y)
-
-    -- TitleBar
-    local titleBar = Instance.new("Frame", mainFrame)
-    titleBar.Name = "TitleBar"
-    titleBar.BackgroundColor3 = TITLEBAR_COLOR
-    titleBar.BorderSizePixel = 0
-    titleBar.Position = UDim2.new(0, 0, 0, 0)
-    titleBar.Size = UDim2.new(1, 0, 0, TITLEBAR_HEIGHT)
-    titleBar.ZIndex = mainFrame.ZIndex + 1
-    self.TitleBar = titleBar
-
-    -- Control Buttons (minimize, maximize, close)
-    local controlGroup = Instance.new("Frame", titleBar)
-    controlGroup.Name = "ControlGroup"
-    controlGroup.Size = UDim2.new(0, 90, 1, 0)
-    controlGroup.AnchorPoint = Vector2.new(1, 0)
-    controlGroup.Position = UDim2.new(1, 0, 0, 0)
-    controlGroup.BackgroundTransparency = 1
-
-    -- Minimize button
-    local btnMin = Instance.new("TextButton", controlGroup)
-    btnMin.Name = "MinimizeButton"
-    btnMin.Size = CONTROL_BTN_SIZE
-    btnMin.Position = UDim2.new(1, -90, 0, 0)
-    btnMin.Text = "-"
-    btnMin.BackgroundColor3 = Color3.fromRGB(200, 200, 0)
-    btnMin.TextColor3 = Color3.new(1,1,1)
-    btnMin.BorderSizePixel = 0
-    self.MinButton = btnMin
-
-    -- Maximize button
-    local btnMax = Instance.new("TextButton", controlGroup)
-    btnMax.Name = "MaximizeButton"
-    btnMax.Size = CONTROL_BTN_SIZE
-    btnMax.Position = UDim2.new(1, -60, 0, 0)
-    btnMax.Text = "◻"
-    btnMax.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-    btnMax.TextColor3 = Color3.new(1,1,1)
-    btnMax.BorderSizePixel = 0
-    self.MaxButton = btnMax
-
-    -- Close button
-    local btnClose = Instance.new("TextButton", controlGroup)
-    btnClose.Name = "CloseButton"
-    btnClose.Size = CONTROL_BTN_SIZE
-    btnClose.Position = UDim2.new(1, -30, 0, 0)
-    btnClose.Text = "X"
-    btnClose.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-    btnClose.TextColor3 = Color3.new(1,1,1)
-    btnClose.BorderSizePixel = 0
-    self.CloseButton = btnClose
-
-    -- Settings button "..."
-    local settingsBtn = Instance.new("TextButton", titleBar)
-    settingsBtn.Name = "SettingsButton"
-    settingsBtn.Size = SETTINGS_BTN_SIZE
-    settingsBtn.AnchorPoint = Vector2.new(1, 0)
-    settingsBtn.Position = UDim2.new(1, -120, 0, 0)
-    settingsBtn.Text = "..."
-    settingsBtn.BackgroundColor3 = TITLEBAR_COLOR
-    settingsBtn.TextColor3 = Color3.new(1,1,1)
-    settingsBtn.BorderSizePixel = 0
-    self.SettingsButton = settingsBtn
-
-    -- Slider Container (hidden by default)
-    local sliderContainer = Instance.new("Frame", mainFrame)
-    sliderContainer.Name = "SliderContainer"
-    sliderContainer.Size = UDim2.new(0, 100, 0, 10)
-    sliderContainer.Position = UDim2.new(1, -110, 0, TITLEBAR_HEIGHT + 5)
-    sliderContainer.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    sliderContainer.Visible = false
-    sliderContainer.ZIndex = titleBar.ZIndex
-    self.SliderContainer = sliderContainer
-
-    -- Slider track & knob
-    local sliderTrack = Instance.new("Frame", sliderContainer)
-    sliderTrack.Name = "Track"
-    sliderTrack.Size = UDim2.new(1, -10, 0, 4)
-    sliderTrack.Position = UDim2.new(0, 5, 0, 3)
-    sliderTrack.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
-    sliderTrack.BorderSizePixel = 0
-
-    local knob = Instance.new("Frame", sliderContainer)
-    knob.Name = "Knob"
-    knob.Size = UDim2.new(0, 10, 0, 10)
-    knob.Position = UDim2.new(0, 0, 0, 0)
-    knob.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-    knob.BorderSizePixel = 0
-    knob.ZIndex = sliderContainer.ZIndex + 1
-    self.SliderKnob = knob
-
-    -- Content area (scroll + input)
-    local contentArea = Instance.new("Frame", mainFrame)
-    contentArea.Name = "ContentArea"
-    contentArea.BackgroundTransparency = 1
-    contentArea.Position = UDim2.new(0, 0, 0, TITLEBAR_HEIGHT)
-    contentArea.Size = UDim2.new(1, 0, 1, -TITLEBAR_HEIGHT - 20)
-    self.ContentArea = contentArea
-
-    -- Scrolling frame for text buffer
-    local scrollFrame = Instance.new("ScrollingFrame", contentArea)
-    scrollFrame.Name = "ScrollContainer"
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.BorderSizePixel = 0
-    scrollFrame.Position = UDim2.new(0, 0, 0, 0)
-    scrollFrame.Size = UDim2.new(1, 0, 1, -20)
-    scrollFrame.ScrollBarThickness = 6
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scrollFrame.VerticalScrollBarInset = Enum.ScrollBarInset.None
-    scrollFrame.ZIndex = contentArea.ZIndex + 1
-    self.ScrollingFrame = scrollFrame
-
-    local uiList = Instance.new("UIListLayout", scrollFrame)
-    uiList.SortOrder = Enum.SortOrder.LayoutOrder
-    uiList.Padding = UDim.new(0, 2)
-    self.UIListLayout = uiList
-
-    -- Input line
-    local inputBox = Instance.new("TextBox", contentArea)
-    inputBox.Name = "InputLine"
-    inputBox.AnchorPoint = Vector2.new(0, 1)
-    inputBox.Position = UDim2.new(0, 0, 1, 0)
-    inputBox.Size = UDim2.new(1, 0, 0, 20)
-    inputBox.BackgroundColor3 = DEFAULT_BG_COLOR
-    inputBox.BackgroundTransparency = 0.5
-    inputBox.TextColor3 = Color3.new(1,1,1)
-    inputBox.Text = ""
-    inputBox.PlaceholderText = ""
-    inputBox.ClearTextOnFocus = false
-    inputBox.TextSize = self.CurrentFontSize
-    inputBox.Font = Enum.Font.SourceSans
-    inputBox.TextWrapped = false
-    inputBox.ZIndex = scrollFrame.ZIndex + 1
-    self.InputLine = inputBox
-
-    -- Minimized icon
-    local iconBtn = Instance.new("ImageButton", screenGui)
-    iconBtn.Name = "MinimizedIcon"
-    iconBtn.Size = ICON_SIZE
-    iconBtn.Position = UDim2.new(0, 10, 0, 10)
-    iconBtn.BackgroundColor3 = TITLEBAR_COLOR
-    iconBtn.BackgroundTransparency = 0.5
-    iconBtn.BorderSizePixel = 0
-    iconBtn.Visible = false
-    iconBtn.ZIndex = mainFrame.ZIndex
-    self.MinimizedIcon = iconBtn
-
-    local iconLabel = Instance.new("TextLabel", iconBtn)
-    iconLabel.Name = "IconLabel"
-    iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = "#"
-    iconLabel.TextColor3 = Color3.new(1,1,1)
-    iconLabel.Font = Enum.Font.SourceSans
-    iconLabel.TextSize = 24
-    iconLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-    iconLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-    iconLabel.Size = UDim2.new(1, 0, 1, 0)
-
-    -- Store references
-    self.ResizeHandles = {}
-    -- Define resize handles
-    local function makeHandle(name, anchor, position, size)
-        local f = Instance.new("Frame", mainFrame)
-        f.Name = name
-        f.Size = size
-        f.AnchorPoint = anchor
-        f.Position = position
-        f.BackgroundTransparency = 1
-        f.BorderSizePixel = 0
-        return f
+local function GetContainer()
+    if PROTECT_GUI and syn and syn.protect_gui then
+        local sg = Instance.new("ScreenGui")
+        syn.protect_gui(sg)
+        sg.Parent = CoreGui
+        return sg
+    elseif gethui then
+        local sg = Instance.new("ScreenGui")
+        sg.Parent = gethui()
+        return sg
+    else
+        local sg = Instance.new("ScreenGui")
+        sg.Parent = CoreGui
+        return sg
     end
-    -- Actually create folder for handles
-    local handleFolder = Instance.new("Folder", mainFrame)
-    handleFolder.Name = "ResizeHandles"
-    self.HandleFolder = handleFolder
-    -- Corners
-    local hTL = makeHandle("TL", Vector2.new(0,0), UDim2.new(0, 0, 0, 0), UDim2.new(0,10,0,10))
-    local hTR = makeHandle("TR", Vector2.new(1,0), UDim2.new(1, 0, 0, 0), UDim2.new(0,10,0,10))
-    local hBL = makeHandle("BL", Vector2.new(0,1), UDim2.new(0, 0, 1, 0), UDim2.new(0,10,0,10))
-    local hBR = makeHandle("BR", Vector2.new(1,1), UDim2.new(1, 0, 1, 0), UDim2.new(0,10,0,10))
-    -- Edges
-    local hT = makeHandle("T", Vector2.new(0.5,0), UDim2.new(0.5, 0, 0, 0), UDim2.new(1, -20, 0,10))
-    local hB = makeHandle("B", Vector2.new(0.5,1), UDim2.new(0.5, 0, 1, 0), UDim2.new(1, -20, 0,10))
-    local hL = makeHandle("L", Vector2.new(0,0.5), UDim2.new(0, 0, 0.5, 0), UDim2.new(0,10,1, -20))
-    local hR = makeHandle("R", Vector2.new(1,0.5), UDim2.new(1, 0, 0.5, 0), UDim2.new(0,10,1, -20))
-    self.ResizeHandles = {TL=hTL, TR=hTR, BL=hBL, BR=hBR, T=hT, B=hB, L=hL, R=hR}
+end
 
-    -- State variables for dragging/resizing
-    self._isDragging = false
-    self._dragStartMouse = Vector2.new()
-    self._startPos = Vector2.new()
-    self._startSize = Vector2.new()
-    self._resizeDir = nil
-    self._isMaximized = false
-    self._isMinimized = false
-    self.waiting = {}
-
-    -- Input focus
-    inputBox.Focused:Connect(function()
-        self.IsInputBlocked = false
-    end)
-
-    -- Input handling (Enter key)
-    inputBox.FocusLost:Connect(function(enterPressed)
-        if enterPressed and not self.IsInputBlocked then
-            local text = inputBox.Text
-            if text ~= "" then
-                self:print("> " .. text)
-            end
-            -- resume waiting coroutine if any
-            if #self.waiting > 0 then
-                local thread = table.remove(self.waiting, 1)
-                coroutine.resume(thread, text)
-            end
-            inputBox.Text = ""
+local function MakeDraggable(object, dragHandle)
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        object.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = object.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
         end
     end)
-
-    -- Toggle slider visibility
-    settingsBtn.MouseButton1Click:Connect(function()
-        sliderContainer.Visible = not sliderContainer.Visible
-    end)
-
-    -- Slider knob dragging
-    local sliderDragging = false
-    local knobStartX = 0
-    knob.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            sliderDragging = true
-            knobStartX = input.Position.X - knob.AbsolutePosition.X
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if sliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local posX = input.Position.X - knobStartX
-            local minX = sliderContainer.AbsolutePosition.X
-            local maxX = sliderContainer.AbsolutePosition.X + sliderContainer.AbsoluteSize.X - knob.AbsoluteSize.X
-            posX = math.clamp(posX, minX, maxX)
-            knob.Position = UDim2.new(0, posX - sliderContainer.AbsolutePosition.X, 0, 0)
-            -- adjust font size based on knob position
-            local fraction = (posX - minX) / (sliderContainer.AbsoluteSize.X - knob.AbsoluteSize.X)
-            local minSize, maxSize = 10, 30
-            local newSize = math.floor(minSize + (maxSize - minSize) * fraction + 0.5)
-            self.CurrentFontSize = newSize
-            -- update all existing labels
-            for _, lbl in ipairs(self.UI_Map) do
-                lbl.TextSize = newSize
-            end
-            inputBox.TextSize = newSize
-        end
+        if input == dragInput and dragging then update(input) end
     end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            sliderDragging = false
-        end
-    end)
+end
 
-    -- Bring window to front on click
-    titleBar.InputBegan:Connect(function(input)
+local function MakeResizable(object, grip, minSize)
+    local resizing, resizeStart, startSize
+    grip.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            mainFrame.ZIndex = Terminal._globalZIndex
-            Terminal._globalZIndex = Terminal._globalZIndex + 1
-        end
-    end)
-
-    -- Drag window
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            self._isDragging = true
-            self._dragStartMouse = Vector2.new(input.Position.X, input.Position.Y)
-            self._startPos = Vector2.new(mainFrame.Position.X.Offset, mainFrame.Position.Y.Offset)
+            resizing = true
+            resizeStart = input.Position
+            startSize = object.AbsoluteSize
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then resizing = false end
+            end)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if self._isDragging and input.UserInputType == Enum.UserInputType.MouseMovement and not self._isMaximized and not self._isMinimized then
-            local delta = Vector2.new(input.Position.X, input.Position.Y) - self._dragStartMouse
-            local newX = self._startPos.X + delta.X
-            local newY = self._startPos.Y + delta.Y
-            mainFrame.Position = UDim2.new(0, newX, 0, newY)
+        if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - resizeStart
+            object.Size = UDim2.new(0, math.max(minSize.X, startSize.X + delta.X), 0, math.max(minSize.Y, startSize.Y + delta.Y))
         end
     end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            self._isDragging = false
-            self._resizeDir = nil
-        end
+end
+
+function TerminalLib.new()
+    local self = setmetatable({}, TerminalLib)
+    
+    self.Gui = GetContainer()
+    self.IsMinimized = false
+    self.IsMaximized = false
+    self.SavedRect = {Pos = UDim2.new(0.5,-250, 0.5,-150), Size = UDim2.new(0, 500, 0, 300)}
+    self.CmdEnabled = false
+    self.InputEnabled = true
+    self.FontSize = 14
+    self.Lines = {}
+    self.WaitingForInput = false
+    self.InputBindable = Instance.new("BindableEvent")
+    
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainTerminal"
+    MainFrame.Size = self.SavedRect.Size
+    MainFrame.Position = self.SavedRect.Pos
+    MainFrame.BackgroundColor3 = Color3.new(0,0,0)
+    MainFrame.BorderSizePixel = 1
+    MainFrame.BorderColor3 = Color3.new(1,1,1)
+    MainFrame.Parent = self.Gui
+    self.MainFrame = MainFrame
+
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 25)
+    TitleBar.BackgroundColor3 = Color3.new(0,0,0)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    local TitleLine = Instance.new("Frame")
+    TitleLine.Size = UDim2.new(1,0,0,1)
+    TitleLine.Position = UDim2.new(0,0,1,0)
+    TitleLine.BackgroundColor3 = Color3.new(1,1,1)
+    TitleLine.BorderSizePixel = 0
+    TitleLine.Parent = TitleBar
+    
+    MakeDraggable(MainFrame, TitleBar)
+
+    local IconFrame = Instance.new("Frame")
+    IconFrame.Size = UDim2.new(0, 50, 0, 50)
+    IconFrame.Position = UDim2.new(0.9, 0, 0.9, 0)
+    IconFrame.BackgroundColor3 = Color3.new(0,0,0)
+    IconFrame.Visible = false
+    IconFrame.Parent = self.Gui
+    
+    local IconCorner = Instance.new("UICorner")
+    IconCorner.CornerRadius = UDim.new(0.5, 0)
+    IconCorner.Parent = IconFrame
+    
+    local IconText = Instance.new("TextButton")
+    IconText.Size = UDim2.new(1,0,1,0)
+    IconText.BackgroundTransparency = 1
+    IconText.Text = "#"
+    IconText.TextColor3 = Color3.new(1,1,1)
+    IconText.TextSize = 24
+    IconText.Font = Enum.Font.Code
+    IconText.Parent = IconFrame
+    
+    local IconResize = Instance.new("Frame")
+    IconResize.Size = UDim2.new(0,10,0,10)
+    IconResize.Position = UDim2.new(1,-10,1,-10)
+    IconResize.BackgroundTransparency = 1
+    IconResize.Parent = IconFrame
+    
+    MakeDraggable(IconFrame, IconFrame)
+    MakeResizable(IconFrame, IconResize, Vector2.new(30,30))
+    self.IconFrame = IconFrame
+
+    local ContentScroll = Instance.new("ScrollingFrame")
+    ContentScroll.Name = "Content"
+    ContentScroll.Position = UDim2.new(0, 5, 0, 30)
+    ContentScroll.Size = UDim2.new(1, -10, 1, -60)
+    ContentScroll.BackgroundTransparency = 1
+    ContentScroll.ScrollBarThickness = 4
+    ContentScroll.ScrollBarImageColor3 = Color3.new(1,1,1)
+    ContentScroll.BorderSizePixel = 0
+    ContentScroll.Parent = MainFrame
+    self.ContentScroll = ContentScroll
+    
+    local UIList = Instance.new("UIListLayout")
+    UIList.SortOrder = Enum.SortOrder.LayoutOrder
+    UIList.Parent = ContentScroll
+    self.UIList = UIList
+    
+    UIList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        ContentScroll.CanvasSize = UDim2.new(0, 0, 0, UIList.AbsoluteContentSize.Y)
+        ContentScroll.CanvasPosition = Vector2.new(0, UIList.AbsoluteContentSize.Y)
     end)
 
-    -- Resize window
-    for name, handle in pairs(self.ResizeHandles) do
-        handle.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                self._resizeDir = name
-                self._dragStartMouse = Vector2.new(input.Position.X, input.Position.Y)
-                self._startPos = Vector2.new(mainFrame.Position.X.Offset, mainFrame.Position.Y.Offset)
-                self._startSize = Vector2.new(mainFrame.Size.X.Offset, mainFrame.Size.Y.Offset)
-            end
+    local InputBox = Instance.new("TextBox")
+    InputBox.Size = UDim2.new(1, -10, 0, 25)
+    InputBox.Position = UDim2.new(0, 5, 1, -30)
+    InputBox.BackgroundColor3 = Color3.new(0,0,0)
+    InputBox.TextColor3 = Color3.new(1,1,1)
+    InputBox.BorderColor3 = Color3.new(1,1,1)
+    InputBox.Font = Enum.Font.Code
+    InputBox.TextSize = self.FontSize
+    InputBox.Text = ""
+    InputBox.ClearTextOnFocus = false
+    InputBox.TextXAlignment = Enum.TextXAlignment.Left
+    InputBox.Parent = MainFrame
+    self.InputBox = InputBox
+
+    local function CreateBtn(text, order)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, 30, 1, 0)
+        btn.Position = UDim2.new(1, -30 * order, 0, 0)
+        btn.BackgroundTransparency = 1
+        btn.Text = text
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Font = Enum.Font.Code
+        btn.TextSize = 14
+        btn.Parent = TitleBar
+        
+        btn.MouseEnter:Connect(function() 
+            btn.BackgroundTransparency = 0 
+            btn.BackgroundColor3 = Color3.new(1,1,1)
+            btn.TextColor3 = Color3.new(0,0,0)
         end)
+        btn.MouseLeave:Connect(function() 
+            btn.BackgroundTransparency = 1
+            btn.TextColor3 = Color3.new(1,1,1)
+        end)
+        return btn
     end
-    UserInputService.InputChanged:Connect(function(input)
-        if self._resizeDir and input.UserInputType == Enum.UserInputType.MouseMovement and not self._isMaximized and not self._isMinimized then
-            local delta = Vector2.new(input.Position.X, input.Position.Y) - self._dragStartMouse
-            local newPos = self._startPos
-            local newSize = self._startSize
-            local dir = self._resizeDir
-            local minW, minH = MIN_WIDTH, MIN_HEIGHT
-            if dir == "L" or dir == "TL" or dir == "BL" then
-                local newWidth = self._startSize.X - delta.X
-                if newWidth < minW then
-                    newPos = Vector2.new(self._startPos.X + (self._startSize.X - minW), newPos.Y)
-                    newWidth = minW
-                else
-                    newPos = Vector2.new(self._startPos.X + delta.X, newPos.Y)
-                end
-                newSize = Vector2.new(newWidth, newSize.Y)
-            end
-            if dir == "R" or dir == "TR" or dir == "BR" then
-                local newWidth = self._startSize.X + delta.X
-                if newWidth < minW then
-                    newWidth = minW
-                end
-                newSize = Vector2.new(newWidth, newSize.Y)
-            end
-            if dir == "T" or dir == "TL" or dir == "TR" then
-                local newHeight = self._startSize.Y - delta.Y
-                if newHeight < minH then
-                    newPos = Vector2.new(newPos.X, self._startPos.Y + (self._startSize.Y - minH))
-                    newHeight = minH
-                else
-                    newPos = Vector2.new(newPos.X, self._startPos.Y + delta.Y)
-                end
-                newSize = Vector2.new(newSize.X, newHeight)
-            end
-            if dir == "B" or dir == "BL" or dir == "BR" then
-                local newHeight = self._startSize.Y + delta.Y
-                if newHeight < minH then
-                    newHeight = minH
-                end
-                newSize = Vector2.new(newSize.X, newHeight)
-            end
-            mainFrame.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
-            mainFrame.Size = UDim2.new(0, newSize.X, 0, newSize.Y)
+
+    local BtnClose = CreateBtn("X", 1)
+    local BtnMax = CreateBtn("□", 2)
+    local BtnMin = CreateBtn("-", 3)
+    local BtnSet = CreateBtn("...", 4)
+    self.BtnClose = BtnClose
+
+    BtnClose.MouseButton1Click:Connect(function()
+        self:close()
+    end)
+
+    BtnMax.MouseButton1Click:Connect(function()
+        if self.IsMaximized then
+            local tw = TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size = self.SavedRect.Size, Position = self.SavedRect.Pos})
+            tw:Play()
+            self.IsMaximized = false
+            TitleBar.Active = true 
+        else
+            self.SavedRect.Size = MainFrame.Size
+            self.SavedRect.Pos = MainFrame.Position
+            local tw = TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size = UDim2.new(1,0,1,0), Position = UDim2.new(0,0,0,0)})
+            tw:Play()
+            self.IsMaximized = true
+            TitleBar.Active = false
         end
     end)
 
-    -- Close, Minimize, Maximize events
-    btnClose.MouseButton1Click:Connect(function()
-        self:Close()
+    BtnMin.MouseButton1Click:Connect(function()
+        if self.IsMinimized then return end
+        self.IsMinimized = true
+        self.SavedRect.Size = MainFrame.Size
+        self.SavedRect.Pos = MainFrame.Position
+        
+        local targetSize = UDim2.new(0, IconFrame.AbsoluteSize.X, 0, IconFrame.AbsoluteSize.Y)
+        local targetPos = UDim2.new(0, IconFrame.AbsolutePosition.X, 0, IconFrame.AbsolutePosition.Y)
+        
+        local tw = TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = targetSize, Position = targetPos, BackgroundTransparency = 1})
+        
+        for _,v in pairs(MainFrame:GetDescendants()) do
+            if v:IsA("GuiObject") then
+                TweenService:Create(v, TweenInfo.new(0.2), {BackgroundTransparency = 1, TextTransparency = 1, ScrollBarImageTransparency = 1}):Play()
+            end
+        end
+        
+        tw:Play()
+        tw.Completed:Connect(function()
+            MainFrame.Visible = false
+            IconFrame.Visible = true
+            local iconPop = TweenService:Create(IconFrame, TweenInfo.new(0.3, Enum.EasingStyle.Elastic), {Size = UDim2.new(0,50,0,50)})
+            IconFrame.Size = UDim2.new(0,0,0,0)
+            iconPop:Play()
+        end)
     end)
-    btnMin.MouseButton1Click:Connect(function()
-        self:Minimize()
+
+    IconText.MouseButton1Click:Connect(function()
+        IconFrame.Visible = false
+        MainFrame.Visible = true
+        MainFrame.Position = UDim2.new(0, IconFrame.AbsolutePosition.X, 0, IconFrame.AbsolutePosition.Y)
+        MainFrame.Size = UDim2.new(0, IconFrame.AbsoluteSize.X, 0, IconFrame.AbsoluteSize.Y)
+        
+        local tw = TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = self.SavedRect.Size, Position = self.SavedRect.Pos, BackgroundTransparency = 0})
+        
+        for _,v in pairs(MainFrame:GetDescendants()) do
+            if v:IsA("GuiObject") and v.Name ~= "Shadow" then 
+                 local props = {BackgroundTransparency = (v.Name == "MainTerminal" or v.Name == "TitleBar" or v == InputBox) and 0 or 1}
+                 if v:IsA("TextLabel") or v:IsA("TextButton") or v:IsA("TextBox") then props.TextTransparency = 0 end
+                 if v:IsA("ScrollingFrame") then props.ScrollBarImageTransparency = 0 end
+                 TweenService:Create(v, TweenInfo.new(0.3), props):Play()
+            end
+        end
+        TitleLine.BackgroundTransparency = 0
+        
+        tw:Play()
+        tw.Completed:Connect(function()
+            self.IsMinimized = false
+        end)
     end)
-    btnMax.MouseButton1Click:Connect(function()
-        self:Maximize()
+
+    local DraggingSet = false
+    local SetStart = 0
+    local FontSizeLabel = Instance.new("TextLabel")
+    FontSizeLabel.Size = UDim2.new(0, 100, 0, 20)
+    FontSizeLabel.AnchorPoint = Vector2.new(0.5, 1)
+    FontSizeLabel.Position = UDim2.new(0.5, 0, 0, -5)
+    FontSizeLabel.BackgroundTransparency = 1
+    FontSizeLabel.Text = "Size: 14"
+    FontSizeLabel.TextColor3 = Color3.new(1,1,1)
+    FontSizeLabel.TextTransparency = 1
+    FontSizeLabel.Parent = BtnSet
+
+    BtnSet.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            DraggingSet = true
+            SetStart = inp.Position.X
+            TweenService:Create(FontSizeLabel, TweenInfo.new(0.2), {TextTransparency = 0}):Play()
+            inp.Changed:Connect(function() if inp.UserInputState == Enum.UserInputState.End then DraggingSet = false TweenService:Create(FontSizeLabel, TweenInfo.new(0.5), {TextTransparency = 1}):Play() end end)
+        end
     end)
-    iconBtn.MouseButton1Click:Connect(function()
-        self:Restore()
+    
+    UserInputService.InputChanged:Connect(function(inp)
+        if DraggingSet and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = inp.Position.X - SetStart
+            if math.abs(delta) > 5 then
+                local change = delta > 0 and 1 or -1
+                self.FontSize = math.clamp(self.FontSize + change, 8, 32)
+                SetStart = inp.Position.X
+                FontSizeLabel.Text = "Size: "..self.FontSize
+                InputBox.TextSize = self.FontSize
+                for _, line in pairs(self.Lines) do line.TextSize = self.FontSize end
+            end
+        end
+    end)
+    
+    local MainResizer = Instance.new("Frame")
+    MainResizer.Size = UDim2.new(0,15,0,15)
+    MainResizer.Position = UDim2.new(1,-15,1,-15)
+    MainResizer.BackgroundTransparency = 1
+    MainResizer.Parent = MainFrame
+    MakeResizable(MainFrame, MainResizer, Vector2.new(200,100))
+
+    InputBox.FocusLost:Connect(function(enter)
+        if enter then
+            local txt = InputBox.Text
+            if self.WaitingForInput then
+                self.InputBindable:Fire(txt)
+                InputBox.Text = ""
+                return
+            end
+            
+            self:print("> "..txt)
+            if self.CmdEnabled then
+                local func, err = loadstring(txt)
+                if func then
+                    local s, e = pcall(func)
+                    if not s then self:print("Error: "..e) end
+                else
+                    self:print("Syntax: "..err)
+                end
+            end
+            InputBox.Text = ""
+            task.delay(0.1, function() InputBox:CaptureFocus() end)
+        end
     end)
 
     return self
 end
 
--- Print a line of text (supports RichText color formatting)
-function Terminal:print(text)
-    if not self.Frame or not self.Frame.Parent then return end
-    table.insert(self.Buffer, text)
-    local index = #self.Buffer
-    -- Create label
-    local label = Instance.new("TextLabel", self.ScrollingFrame)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.RichText = true
+function TerminalLib:print(text)
+    local str = tostring(text)
+    str = str:gsub("\\n", "\n")
+    local label = Instance.new("TextLabel")
+    label.Text = str
     label.TextColor3 = Color3.new(1,1,1)
-    label.TextSize = self.CurrentFontSize
+    label.Font = Enum.Font.Code
+    label.TextSize = self.FontSize
+    label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Top
-    label.Font = Enum.Font.SourceSans
-    label.TextWrapped = false
-    label.LayoutOrder = index
-    self.UI_Map[index] = label
-    -- Scroll to bottom
-    self.ScrollingFrame.CanvasPosition = Vector2.new(0, math.huge)
-    -- Trim buffer if needed
-    if #self.Buffer > self.MaxLines then
-        local diff = #self.Buffer - self.MaxLines
-        for i = 1, diff do
-            if self.UI_Map[1] then
-                self.UI_Map[1]:Destroy()
-            end
-            table.remove(self.UI_Map, 1)
-            table.remove(self.Buffer, 1)
-        end
-        for i, lbl in ipairs(self.UI_Map) do
-            lbl.LayoutOrder = i
-        end
+    label.AutomaticSize = Enum.AutomaticSize.Y
+    label.Size = UDim2.new(1, 0, 0, 0)
+    label.TextWrapped = true
+    label.Parent = self.ContentScroll
+    table.insert(self.Lines, label)
+end
+
+function TerminalLib:clear()
+    for _, v in pairs(self.Lines) do v:Destroy() end
+    self.Lines = {}
+end
+
+function TerminalLib:deleteLine(idx)
+    if self.Lines[idx] then
+        self.Lines[idx]:Destroy()
+        table.remove(self.Lines, idx)
     end
 end
 
--- Clear all text
-function Terminal:clear()
-    for _, lbl in ipairs(self.UI_Map) do
-        if lbl then lbl:Destroy() end
-    end
-    self.Buffer = {}
-    self.UI_Map = {}
-    self.ScrollingFrame.CanvasPosition = Vector2.new(0, 0)
-end
-
--- Replace entire line text by index
-function Terminal:replace_line(lineIndex, newText)
-    if self.Buffer[lineIndex] then
-        self.Buffer[lineIndex] = newText
-        if self.UI_Map[lineIndex] then
-            self.UI_Map[lineIndex].Text = newText
-        end
+function TerminalLib:replaceLine(idx, text)
+    if self.Lines[idx] then
+        self.Lines[idx].Text = text
     end
 end
 
--- Replace one character in a line
-function Terminal:replace_char(lineIndex, charIndex, newChar)
-    local line = self.Buffer[lineIndex]
-    if line and charIndex >= 1 and charIndex <= #line then
-        local updated = line:sub(1, charIndex-1) .. newChar .. line:sub(charIndex+1)
-        self.Buffer[lineIndex] = updated
-        if self.UI_Map[lineIndex] then
-            self.UI_Map[lineIndex].Text = updated
-        end
+function TerminalLib:replaceAt(lineIdx, charIdx, text)
+    if self.Lines[lineIdx] then
+        local old = self.Lines[lineIdx].Text
+        local pre = string.sub(old, 1, charIdx - 1)
+        local post = string.sub(old, charIdx + #text)
+        self.Lines[lineIdx].Text = pre .. text .. post
     end
 end
 
--- Enable or disable user input (toggle TextBox)
-function Terminal:toggle_input(enabled)
-    self.IsInputBlocked = not enabled
-    if enabled then
-        self.InputLine.TextEditable = true
-        self.InputLine.ClearTextOnFocus = true
-        self.InputLine.TextColor3 = Color3.new(1,1,1)
-    else
-        self.InputLine.TextEditable = false
-        self.InputLine.ClearTextOnFocus = false
-        self.InputLine.TextColor3 = Color3.fromRGB(150,150,150)
-    end
+function TerminalLib:input()
+    self.WaitingForInput = true
+    self.InputBox.PlaceholderText = "Waiting for input..."
+    self.InputBox:CaptureFocus()
+    local val = self.InputBindable.Event:Wait()
+    self.WaitingForInput = false
+    self.InputBox.PlaceholderText = ""
+    return val
 end
 
--- Synchronous input: prints prompt and yields until Enter pressed
-function Terminal:input(prompt)
-    self:print(prompt)
-    self:toggle_input(true)
-    local thread = coroutine.running()
-    table.insert(self.waiting, thread)
-    return coroutine.yield()
+function TerminalLib:setInputEnabled(bool)
+    self.InputEnabled = bool
+    self.InputBox.TextEditable = bool
+    self.InputBox.Visible = bool
+    if not bool then self.ContentScroll.Size = UDim2.new(1,-10,1,-10) else self.ContentScroll.Size = UDim2.new(1,-10,1,-60) end
 end
 
--- Execute code via loadstring (executor environment)
-function Terminal:run(code)
-    local loadf = loadstring or (getgenv and getgenv().loadstring)
-    if loadf then
-        local func, err = loadf(code)
-        if func then
-            local success, runtimeError = pcall(function()
-                func()
-            end)
-            if not success then
-                self:print("Error: " .. tostring(runtimeError))
-            end
-        else
-            self:print("Syntax error: " .. tostring(err))
-        end
-    else
-        self:print("Error: environment doesn't support loadstring!")
-    end
+function TerminalLib:setCmdEnabled(bool)
+    self.CmdEnabled = bool
 end
 
--- Minimize window to icon
-function Terminal:Minimize()
-    if self._isMinimized then return end
-    self._savedPosition = self.Frame.Position
-    self._savedSize = self.Frame.Size
-    self.Frame.Visible = false
-    self.MinimizedIcon.Visible = true
-    self.MinimizedIcon.Position = UDim2.new(0, self._savedPosition.X.Offset, 0, self._savedPosition.Y.Offset)
-    self.MinimizedIcon.Size = ICON_SIZE
-    self._isMinimized = true
+function TerminalLib:setCloseEnabled(bool)
+    self.BtnClose.Visible = bool
 end
 
--- Restore from minimized or maximized
-function Terminal:Restore()
-    if self._isMinimized then
-        self.Frame.Visible = true
-        self.Frame.Position = self._savedPosition
-        self.Frame.Size = self._savedSize
-        self.MinimizedIcon.Visible = false
-        self._isMinimized = false
-    elseif self._isMaximized then
-        self:Maximize()
-    end
+function TerminalLib:close()
+    self.Gui:Destroy()
 end
 
--- Maximize or restore window
-function Terminal:Maximize()
-    if not self._isMaximized then
-        self._savedPosition = self.Frame.Position
-        self._savedSize = self.Frame.Size
-        local goalPos = UDim2.new(0, 0, 0, 0)
-        local goalSize = UDim2.new(1, 0, 1, 0)
-        TweenService:Create(self.Frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = goalPos, Size = goalSize}):Play()
-        self._isMaximized = true
-    else
-        TweenService:Create(self.Frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = self._savedPosition, Size = self._savedSize}):Play()
-        self._isMaximized = false
-    end
-end
-
--- Close terminal (destroy UI and resume any waiting coroutines)
-function Terminal:Close()
-    for _, thread in ipairs(self.waiting) do
-        coroutine.resume(thread, "")
-    end
-    self.waiting = {}
-    if self.ScreenGui then
-        self.ScreenGui:Destroy()
-        self.ScreenGui = nil
-    end
-    self.Frame = nil
-end
-
-return Terminal
+getgenv().TerminalLib = TerminalLib
+return TerminalLib
