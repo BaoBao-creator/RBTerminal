@@ -178,8 +178,9 @@ function TerminalLib.new()
     InputBox.Parent = MainFrame
     self.InputBox = InputBox
 
-    local function CreateBtn(text, order)
+local function CreateBtn(text, order)
         local btn = Instance.new("TextButton")
+        btn.Name = "Btn_" .. text -- Đặt tên để dễ debug nếu cần
         btn.Size = UDim2.new(0, 30, 1, 0)
         btn.Position = UDim2.new(1, -30 * order, 0, 0)
         btn.BackgroundTransparency = 1
@@ -187,7 +188,9 @@ function TerminalLib.new()
         btn.TextColor3 = Color3.new(1,1,1)
         btn.Font = Enum.Font.Code
         btn.TextSize = 14
-        btn.Parent = TitleBar
+        btn.ZIndex = 10 -- [QUAN TRỌNG] Đưa nút lên lớp cao nhất để nhận click
+        btn.Active = true -- Đảm bảo nút nhận tín hiệu input
+        btn.Parent = TitleBar -- TitleBar vẫn là cha, nhưng ZIndex con cao hơn sẽ nổi lên
         
         btn.MouseEnter:Connect(function() 
             btn.BackgroundTransparency = 0 
