@@ -320,25 +320,52 @@ function TerminalLib.new()
     MainResizer.Parent = MainFrame
     MakeResizable(MainFrame, MainResizer, Vector2.new(200,100))
 
+-- Tìm đoạn InputBox.FocusLost cũ và thay bằng đoạn này:
     InputBox.FocusLost:Connect(function(enter)
         if enter then
             local txt = InputBox.Text
+            
+            -- 1. Ưu tiên: Nếu script đang đợi input từ hàm :input()
             if self.WaitingForInput then
                 self.InputBindable:Fire(txt)
                 InputBox.Text = ""
                 return
             end
+
+            self:print("> "..txt) -- In lại dòng người dùng vừa nhập
+
+            -- 2. Xử lý các LỆNH TẮT (Custom Commands)
+            local command = txt:lower() -- Chuyển về chữ thường để không phân biệt hoa thường
             
-            self:print("> "..txt)
+            if command == "clear" or command == "cls" then
+                self:clear()
+                InputBox.Text = ""
+                task.delay(0.1, function() InputBox:CaptureFocus() end) -- Giữ focus để nhập tiếp
+                return
+            elseif command == "exit" then
+                self:close()
+                return
+            end
+
+            -- 3. Xử lý chạy code Lua (Nếu CmdEnabled = true)
             if self.CmdEnabled then
                 local func, err = loadstring(txt)
                 if func then
+                    -- Tạo môi trường để script có thể gọi 'print' hoặc 'clear' trực tiếp trong code
+                    local env = getgenv() 
+                    setfenv(func, setmetatable({
+                        print = function(...) self:print(...) end,
+                        clear = function() self:clear() end,
+                        wait = task.wait
+                    }, {__index = env}))
+                    
                     local s, e = pcall(func)
                     if not s then self:print("Error: "..e) end
                 else
                     self:print("Syntax: "..err)
                 end
             end
+            
             InputBox.Text = ""
             task.delay(0.1, function() InputBox:CaptureFocus() end)
         end
