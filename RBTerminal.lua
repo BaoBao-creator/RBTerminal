@@ -178,7 +178,7 @@ function TerminalLib.new()
     InputBox.Parent = MainFrame
     self.InputBox = InputBox
 
-local function CreateBtn(text, order)
+    local function CreateBtn(text, order)
         local btn = Instance.new("TextButton")
         btn.Name = "Btn_" .. text -- Đặt tên để dễ debug nếu cần
         btn.Size = UDim2.new(0, 30, 1, 0)
@@ -237,7 +237,7 @@ local function CreateBtn(text, order)
         self.SavedRect.Pos = MainFrame.Position
         
         local targetSize = UDim2.new(0, IconFrame.AbsoluteSize.X, 0, IconFrame.AbsoluteSize.Y)
-        local targetPos = UDim2.new(0, IconFrame.AbsolutePosition.X, 0, IconFrame.AbsolutePosition.Y)
+        local targetPos = IconFrame.Position
         
         local tw = TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = targetSize, Position = targetPos, BackgroundTransparency = 1})
         
